@@ -18,7 +18,7 @@ config={'host':'127.0.0.1','port':18318,'auth-dir':'/tmp/test-auth','api-keys':[
 (work/'config.yaml').write_text(yaml.safe_dump(config))
 plugin=work/'plugins'/'linux'/'amd64';plugin.mkdir(parents=True,exist_ok=True)
 for old in plugin.glob('headroom*.so'):old.unlink()
-shutil.copy2(root/'dist/headroom.so',plugin/'headroom-v0.4.0.so')
+shutil.copy2(root/'dist/headroom.so',plugin/'headroom-v0.5.0.so')
 statsdir=work/'stats-v02';statsdir.mkdir(exist_ok=True)
 name='headroom-plugin-integration'
 subprocess.run(['docker','run','-d','--rm','--name',name,'--network','host','-v',str(work/'config.yaml')+':/CLIProxyAPI/config.yaml:ro','-v',str(work/'plugins')+':/plugins:ro','-v',str(statsdir)+':/stats','eceasy/cli-proxy-api:latest'],check=True,stdout=subprocess.DEVNULL)
@@ -41,10 +41,18 @@ try:
   if stream:assert b'[DONE]' in response
   summary.append({'stream':stream,'tool_bytes_before':len(log),'tool_bytes_after':len(out),'unique_error_preserved':True,'provider_response_ok':True})
 
+ body={'model':'headroom-test','messages':[{'role':'system','content':'Keep instructions intact'},{'role':'user','content':log}]}
+ req=urllib.request.Request('http://127.0.0.1:18318/v1/chat/completions',data=json.dumps(body).encode(),headers={'Authorization':'Bearer test-only','Content-Type':'application/json'})
+ urllib.request.urlopen(req,timeout=90).read()
+ got=captures[-1];out=got['messages'][1]['content']
+ assert len(out)<len(log),(len(out),len(log))
+ assert 'TX-123' in out and got['messages'][0]==body['messages'][0]
+ summary.append({'user_bytes_before':len(log),'user_bytes_after':len(out),'system_preserved':True})
+
  def getstats():
   req=urllib.request.Request('http://127.0.0.1:18318/v0/management/plugins/headroom/stats',headers={'Authorization':'Bearer headroom-integration-only'})
   return json.load(urllib.request.urlopen(req,timeout=5))
- stats=getstats();assert stats['totals']['compressed']>=2,stats
+ stats=getstats();assert stats['totals']['compressed']>=3,stats
  try:
   urllib.request.urlopen('http://127.0.0.1:18318/v0/management/plugins/headroom/stats',timeout=5)
   raise AssertionError('stats exposed without authentication')
