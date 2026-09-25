@@ -25,7 +25,7 @@ Tested with CLIProxyAPI v7.3.4 and Headroom v0.37.0 on Linux amd64. The initial 
 
 ## Install
 
-Download `headroom_0.3.0_linux_amd64.zip` and `checksums.txt` from [Releases](https://github.com/frankyw/cliproxyapi-headroom/releases). Verify the checksum, extract `headroom.so`, and install it as `plugins/linux/amd64/headroom-v0.3.0.so` in CLIProxyAPI's persistent plugin directory. Back up your config and retain other plugin settings when merging:
+Download `headroom_0.4.0_linux_amd64.zip` and `checksums.txt` from [Releases](https://github.com/frankyw/cliproxyapi-headroom/releases). Verify the checksum, extract `headroom.so`, and install it as `plugins/linux/amd64/headroom-v0.4.0.so` in CLIProxyAPI's persistent plugin directory. Back up your config and retain other plugin settings when merging:
 
 ```yaml
 plugins:
@@ -47,15 +47,16 @@ Restart CLIProxyAPI, then refresh the manager and open **Headroom Stats** in its
 
 `service_url` optionally overrides the service root used for health/statistics. Empty uses the origin of `endpoint`. Use it if Headroom is hosted under a URL prefix. Keep these operator-configured endpoints on trusted infrastructure.
 
-## Dashboard authentication
+## Dashboard access
 
-The static page is public, but all statistics endpoints require the existing management credential. On the same origin, the page can reuse a remembered CPA Manager session. If the manager did not remember its credential, the page asks for the same manager key once; it keeps that key only in page memory. In Plus mode use the Plus admin key; on the CPA-hosted panel use the CPA management key.
+The Headroom Stats page and its aggregate data are public plugin resources. Anyone who can reach the CLIProxyAPI or CPA Manager Plus address can view the model breakdown, recent request metadata, savings history, and filtered Headroom health and service metrics. The page does not ask for a second key. It never includes prompts, tool output, request headers, API keys, or Headroom project labels. Keep the manager address on a trusted network or protect it with your own reverse proxy if these aggregate figures should remain private.
 
 - Page: `/v0/resource/plugins/headroom/stats`
-- CPA-only data: `/v0/management/plugins/headroom/stats`
-- Headroom service data: `/v0/management/plugins/headroom/service-stats`
+- Public CPA-only data: `/v0/resource/plugins/headroom/stats-data`
+- Public Headroom service data: `/v0/resource/plugins/headroom/service-data`
+- Existing authenticated management APIs remain available at `/v0/management/plugins/headroom/stats` and `/v0/management/plugins/headroom/service-stats`.
 
-Custom reverse proxies must pass both `/v0/resource/plugins/*` and `/v0/management/plugins/*` to the corresponding manager/CPA service.
+Custom reverse proxies must pass `/v0/resource/plugins/*` to the corresponding manager/CPA service.
 
 ## Statistics and interpretation
 
@@ -84,13 +85,13 @@ HEADROOM_TEST_URL=http://headroom:8787/v1/compress sh scripts/test-live.sh
 
 The build uses Go 1.26 with a C compiler and `-buildmode=c-shared`, not Go's compiler-specific plugin format. Override release metadata with `REPOSITORY_URL` and `PLUGIN_AUTHOR`; GitHub Actions populates them automatically.
 
-On Linux with Docker, Python 3 and PyYAML, `python3 tests/integration.py` runs an isolated CLIProxyAPI container and mock provider with Headroom at `127.0.0.1:8787`, ports 18318/18319, and no production credentials. It verifies compression, streaming, authenticated stats, page registration, all five service endpoints and restart persistence. Work files remain in ignored `work/`.
+On Linux with Docker, Python 3 and PyYAML, `python3 tests/integration.py` runs an isolated CLIProxyAPI container and mock provider with Headroom at `127.0.0.1:8787`, ports 18318/18319, and no production credentials. It verifies compression, streaming, public resource stats and still-authenticated management APIs, page registration, all five service endpoints and restart persistence. Work files remain in ignored `work/`.
 
 ## Releases and plugin store
 
-Push a tag matching `plugin.go`, currently `v0.3.0`. GitHub Actions runs race tests and produces:
+Push a tag matching `plugin.go`, currently `v0.4.0`. GitHub Actions runs race tests and produces:
 
-- `headroom_0.3.0_linux_amd64.zip`, containing `headroom.so` at its root
+- `headroom_0.4.0_linux_amd64.zip`, containing `headroom.so` at its root
 - `checksums.txt`, in SHA-256 format
 
 See `store/registry-entry.json` and `store/PR.md` for the prepared official store entry. Store inclusion requires an upstream PR; publishing this repository does not itself list the plugin.

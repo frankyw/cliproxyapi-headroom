@@ -83,7 +83,7 @@ func TestManagementRoutesAndStaticPage(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !bytes.Contains(raw, []byte("Headroom Stats")) || !bytes.Contains(raw, []byte("/plugins/headroom/stats")) {
+	if !bytes.Contains(raw, []byte("Headroom Stats")) || !bytes.Contains(raw, []byte("/plugins/headroom/stats")) || !bytes.Contains(raw, []byte("/stats-data")) || !bytes.Contains(raw, []byte("/service-data")) {
 		t.Fatal("missing routes")
 	}
 	for _, test := range []struct {

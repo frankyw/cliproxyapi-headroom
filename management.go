@@ -9,7 +9,7 @@ import (
 var dashboard []byte
 
 func managementRegistration() ([]byte, error) {
-	return okEnvelope(map[string]any{"resources": []map[string]any{{"Path": "/stats", "Menu": "Headroom Stats", "Description": "CPA compression savings, latency and history"}}, "routes": []map[string]any{{"Method": "GET", "Path": "/plugins/headroom/stats"}, {"Method": "GET", "Path": "/plugins/headroom/service-stats"}}})
+	return okEnvelope(map[string]any{"resources": []map[string]any{{"Path": "/stats", "Menu": "Headroom Stats", "Description": "CPA compression savings, latency and history"}, {"Path": "/stats-data"}, {"Path": "/service-data"}}, "routes": []map[string]any{{"Method": "GET", "Path": "/plugins/headroom/stats"}, {"Method": "GET", "Path": "/plugins/headroom/service-stats"}}})
 }
 func managementHandle(raw []byte) ([]byte, error) {
 	var req struct{ Method, Path string }
@@ -25,7 +25,7 @@ func managementHandle(raw []byte) ([]byte, error) {
 	case req.Path == "/v0/resource/plugins/headroom/stats":
 		contentType = "text/html; charset=utf-8"
 		body = dashboard
-	case req.Path == "/v0/management/plugins/headroom/stats":
+	case req.Path == "/v0/management/plugins/headroom/stats" || req.Path == "/v0/resource/plugins/headroom/stats-data":
 		cfg := settings.Load()
 		if cfg == nil || cfg.stats == nil {
 			status = 503
@@ -33,7 +33,7 @@ func managementHandle(raw []byte) ([]byte, error) {
 		} else {
 			body, _ = json.Marshal(cfg.stats.snapshot())
 		}
-	case req.Path == "/v0/management/plugins/headroom/service-stats":
+	case req.Path == "/v0/management/plugins/headroom/service-stats" || req.Path == "/v0/resource/plugins/headroom/service-data":
 		cfg := settings.Load()
 		if cfg == nil {
 			status = 503

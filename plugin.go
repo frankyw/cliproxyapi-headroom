@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 var repository = "https://github.com/frankyw/cliproxyapi-headroom"
 var author = "frankyw"
