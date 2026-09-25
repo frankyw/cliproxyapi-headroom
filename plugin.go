@@ -16,19 +16,20 @@ import (
 	"time"
 )
 
-const version = "0.4.0"
+const version = "0.5.0"
 
 var repository = "https://github.com/frankyw/cliproxyapi-headroom"
 var author = "frankyw"
 
 type config struct {
-	ServiceURL  string  `yaml:"service_url"`
-	StatsPath   string  `yaml:"stats_path"`
-	Endpoint    string  `yaml:"endpoint"`
-	TokenEnv    string  `yaml:"token_env"`
-	TimeoutMS   int     `yaml:"timeout_ms"`
-	MinChars    int     `yaml:"min_chars"`
-	TargetRatio float64 `yaml:"target_ratio"`
+	ServiceURL           string  `yaml:"service_url"`
+	StatsPath            string  `yaml:"stats_path"`
+	Endpoint             string  `yaml:"endpoint"`
+	TokenEnv             string  `yaml:"token_env"`
+	TimeoutMS            int     `yaml:"timeout_ms"`
+	MinChars             int     `yaml:"min_chars"`
+	TargetRatio          float64 `yaml:"target_ratio"`
+	CompressUserMessages bool    `yaml:"compress_user_messages"`
 }
 type runtimeConfig struct {
 	config
@@ -53,7 +54,7 @@ func configure(raw []byte) error {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return err
 	}
-	cfg := config{Endpoint: "http://headroom:8787/v1/compress", TimeoutMS: 10000, MinChars: 512, TargetRatio: 0.5}
+	cfg := config{Endpoint: "http://headroom:8787/v1/compress", TimeoutMS: 10000, MinChars: 512, TargetRatio: 0.5, CompressUserMessages: true}
 	if err := yaml.Unmarshal(req.ConfigYAML, &cfg); err != nil {
 		return err
 	}
@@ -87,7 +88,7 @@ func handleMethod(method string, raw []byte) ([]byte, error) {
 			return nil, err
 		}
 		fields := []map[string]any{}
-		for _, f := range []struct{ name, kind, desc string }{{"service_url", "string", "Optional Headroom service root for health and statistics; defaults to endpoint origin"}, {"stats_path", "string", "Persistent statistics file; empty means memory only"}, {"endpoint", "string", "Headroom compression-only URL"}, {"token_env", "string", "Optional environment variable containing the Headroom token"}, {"timeout_ms", "integer", "Compression timeout; original request is used on failure"}, {"min_chars", "integer", "Minimum tool output characters to compress"}, {"target_ratio", "number", "Requested retained content ratio"}} {
+		for _, f := range []struct{ name, kind, desc string }{{"service_url", "string", "Optional Headroom service root for health and statistics; defaults to endpoint origin"}, {"stats_path", "string", "Persistent statistics file; empty means memory only"}, {"endpoint", "string", "Headroom compression-only URL"}, {"token_env", "string", "Optional environment variable containing the Headroom token"}, {"timeout_ms", "integer", "Compression timeout; original request is used on failure"}, {"min_chars", "integer", "Minimum text characters to compress"}, {"target_ratio", "number", "Requested retained content ratio"}, {"compress_user_messages", "boolean", "Compress eligible user-message text; defaults to true. System messages remain unchanged"}} {
 			fields = append(fields, map[string]any{"Name": f.name, "Type": f.kind, "Description": f.desc})
 		}
 		return okEnvelope(map[string]any{"schema_version": 6, "metadata": map[string]any{"Name": "headroom", "Version": version, "Author": author, "GitHubRepository": repository, "ConfigFields": fields}, "capabilities": map[string]any{"request_interceptor": true, "management_api": true}})
@@ -118,25 +119,26 @@ func handleMethod(method string, raw []byte) ([]byte, error) {
 
 type candidate struct {
 	text  string
+	role  string
 	apply func(string)
 }
 
-// Project tool-result text only, preserving the original protocol and IDs.
-func candidates(body map[string]any, min int) []candidate {
+// Project eligible text while preserving the original protocol and IDs.
+func candidates(body map[string]any, min int, includeUser bool) []candidate {
 	var out []candidate
-	add := func(m map[string]any, key string) {
+	add := func(m map[string]any, key, role string) {
 		if s, ok := m[key].(string); ok && len(s) >= min {
-			out = append(out, candidate{s, func(v string) { m[key] = v }})
+			out = append(out, candidate{s, role, func(v string) { m[key] = v }})
 		}
 	}
-	textBlocks := func(m map[string]any, key string) {
-		add(m, key)
+	textBlocks := func(m map[string]any, key, role string) {
+		add(m, key, role)
 		if blocks, ok := m[key].([]any); ok {
 			for _, b := range blocks {
 				if block, ok := b.(map[string]any); ok {
 					t, _ := block["type"].(string)
 					if t == "text" || t == "input_text" || t == "output_text" {
-						add(block, "text")
+						add(block, "text", role)
 					}
 				}
 			}
@@ -149,12 +151,15 @@ func candidates(body map[string]any, min int) []candidate {
 				continue
 			}
 			if m["role"] == "tool" || m["role"] == "function" {
-				textBlocks(m, "content")
+				textBlocks(m, "content", "tool")
+			}
+			if includeUser && m["role"] == "user" {
+				textBlocks(m, "content", "user")
 			}
 			if blocks, ok := m["content"].([]any); ok {
 				for _, b := range blocks {
 					if block, ok := b.(map[string]any); ok && block["type"] == "tool_result" {
-						textBlocks(block, "content")
+						textBlocks(block, "content", "tool")
 					}
 				}
 			}
@@ -162,8 +167,13 @@ func candidates(body map[string]any, min int) []candidate {
 	}
 	if input, ok := body["input"].([]any); ok {
 		for _, item := range input {
-			if m, ok := item.(map[string]any); ok && m["type"] == "function_call_output" {
-				textBlocks(m, "output")
+			if m, ok := item.(map[string]any); ok {
+				if m["type"] == "function_call_output" {
+					textBlocks(m, "output", "tool")
+				}
+				if includeUser && m["role"] == "user" {
+					textBlocks(m, "content", "user")
+				}
 			}
 		}
 	}
@@ -174,7 +184,7 @@ func candidates(body map[string]any, min int) []candidate {
 		case map[string]any:
 			for k, v := range m {
 				if _, ok := v.(string); ok {
-					add(m, k)
+					add(m, k, "tool")
 				} else {
 					leaves(v)
 				}
@@ -193,6 +203,9 @@ func candidates(body map[string]any, min int) []candidate {
 						if part, ok := p.(map[string]any); ok {
 							if f, ok := part["functionResponse"].(map[string]any); ok {
 								leaves(f["response"])
+							}
+							if includeUser && m["role"] == "user" {
+								add(part, "text", "user")
 							}
 						}
 					}
@@ -228,15 +241,19 @@ func compressBody(req interceptRequest, cfg *runtimeConfig) (output []byte, fail
 	if err := dec.Decode(&body); err != nil {
 		return nil, nil
 	}
-	selected := candidates(body, cfg.MinChars)
+	selected := candidates(body, cfg.MinChars, cfg.CompressUserMessages)
 	if len(selected) == 0 {
 		return nil, nil
 	}
 	messages := make([]map[string]any, 0, len(selected))
 	for i, c := range selected {
-		messages = append(messages, map[string]any{"role": "tool", "tool_call_id": fmt.Sprintf("headroom_%d", i), "content": c.text})
+		message := map[string]any{"role": c.role, "content": c.text}
+		if c.role == "tool" {
+			message["tool_call_id"] = fmt.Sprintf("headroom_%d", i)
+		}
+		messages = append(messages, message)
 	}
-	payload, _ := json.Marshal(map[string]any{"model": req.Model, "messages": messages, "config": map[string]any{"mode": "lossy_inline", "target_ratio": cfg.TargetRatio, "protect_recent": 0, "protect_analysis_context": false, "compress_user_messages": false}})
+	payload, _ := json.Marshal(map[string]any{"model": req.Model, "messages": messages, "config": map[string]any{"mode": "lossy_inline", "target_ratio": cfg.TargetRatio, "protect_recent": 0, "protect_analysis_context": false, "compress_user_messages": cfg.CompressUserMessages}})
 	request, err := http.NewRequest(http.MethodPost, cfg.Endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, errors.New("invalid compression request")

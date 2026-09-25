@@ -14,7 +14,11 @@ import (
 
 func setup(t *testing.T, url string) {
 	t.Helper()
-	y := []byte("endpoint: " + url + "\nmin_chars: 10\ntimeout_ms: 1000\n")
+	setupConfig(t, url, "")
+}
+func setupConfig(t *testing.T, url, extra string) {
+	t.Helper()
+	y := []byte("endpoint: " + url + "\nmin_chars: 10\ntimeout_ms: 1000\n" + extra)
 	r, _ := json.Marshal(map[string]any{"config_yaml": y})
 	if e := configure(r); e != nil {
 		t.Fatal(e)
@@ -86,11 +90,84 @@ func TestFailOpen(t *testing.T) {
 	}
 }
 func TestNoToolOutputNoNetwork(t *testing.T) {
-	setup(t, "http://127.0.0.1:1")
+	setupConfig(t, "http://127.0.0.1:1", "compress_user_messages: false\n")
 	raw := []byte(`{"messages":[{"role":"user","content":"long user request remains intact"}]}`)
 	got, e := compressBody(interceptRequest{Body: raw}, settings.Load())
 	if e != nil || got != nil {
 		t.Fatal(e, string(got))
+	}
+}
+func TestUserMessagesDefaultOnAndRuntimeOption(t *testing.T) {
+	long := strings.Repeat("document paragraph ", 20)
+	cases := []string{
+		`{"messages":[{"role":"system","content":"INSTRUCTIONS"},{"role":"user","content":"LONG"}]}`,
+		`{"messages":[{"role":"user","content":[{"type":"text","text":"LONG"}]}]}`,
+		`{"input":[{"role":"user","content":[{"type":"input_text","text":"LONG"}]}]}`,
+		`{"contents":[{"role":"user","parts":[{"text":"LONG"}]}]}`,
+	}
+	seen := 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			t.Error(err)
+			return
+		}
+		cfg := b["config"].(map[string]any)
+		if cfg["compress_user_messages"] != true {
+			t.Error("runtime user option is not enabled")
+		}
+		msgs := b["messages"].([]any)
+		if len(msgs) != 1 || msgs[0].(map[string]any)["role"] != "user" {
+			t.Error("only user text should be sent", msgs)
+		}
+		msgs[0].(map[string]any)["content"] = "short"
+		seen++
+		json.NewEncoder(w).Encode(map[string]any{"messages": msgs, "ccr_hashes": []string{}})
+	}))
+	defer s.Close()
+	setup(t, s.URL)
+	for _, c := range cases {
+		raw := []byte(strings.ReplaceAll(c, "LONG", long))
+		got, err := compressBody(interceptRequest{Body: raw, Model: "x"}, settings.Load())
+		if err != nil || !bytes.Contains(got, []byte("short")) || bytes.Contains(got, []byte(long)) {
+			t.Fatalf("user text not compressed: %v %s", err, got)
+		}
+		if bytes.Contains(raw, []byte("INSTRUCTIONS")) && !bytes.Contains(got, []byte("INSTRUCTIONS")) {
+			t.Fatal("system message changed")
+		}
+	}
+	if seen != len(cases) {
+		t.Fatalf("Headroom calls = %d", seen)
+	}
+}
+func TestUserCompressionOffStillCompressesTool(t *testing.T) {
+	long := strings.Repeat("document paragraph ", 20)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		json.NewDecoder(r.Body).Decode(&b)
+		if b["config"].(map[string]any)["compress_user_messages"] != false {
+			t.Error("runtime option should be false")
+		}
+		msgs := b["messages"].([]any)
+		if len(msgs) != 1 || msgs[0].(map[string]any)["role"] != "tool" {
+			t.Error("wrong candidate selection", msgs)
+		}
+		msgs[0].(map[string]any)["content"] = "short"
+		json.NewEncoder(w).Encode(map[string]any{"messages": msgs})
+	}))
+	defer s.Close()
+	setupConfig(t, s.URL, "compress_user_messages: false\n")
+	raw := []byte(`{"messages":[{"role":"user","content":"LONG"},{"role":"tool","content":"LONG"}]}`)
+	raw = []byte(strings.ReplaceAll(string(raw), "LONG", long))
+	got, err := compressBody(interceptRequest{Body: raw}, settings.Load())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	json.Unmarshal(got, &body)
+	msgs := body["messages"].([]any)
+	if msgs[0].(map[string]any)["content"] != long || msgs[1].(map[string]any)["content"] != "short" {
+		t.Fatal("toggle was not respected")
 	}
 }
 func TestTimeout(t *testing.T) {

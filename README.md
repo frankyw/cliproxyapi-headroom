@@ -1,11 +1,11 @@
 # Headroom for CLIProxyAPI
 
-Native CLIProxyAPI plugin that compresses tool-result text through Headroom and adds an embedded statistics page to CPA Manager Plus and compatible CPA-hosted panels. No manager modifications are required.
+Native CLIProxyAPI plugin that compresses eligible user-message and tool-result text through Headroom and adds an embedded statistics page to CPA Manager Plus and compatible CPA-hosted panels. No manager modifications are required.
 
 ## Features
 
-- OpenAI Chat, Responses/Codex, Anthropic and Gemini tool-output compression.
-- Preserves instructions, user messages, tool IDs, images and provider routing.
+- OpenAI Chat, Responses/Codex, Anthropic and Gemini user-message and tool-output compression.
+- Preserves system messages, tool IDs, images and provider routing.
 - Marker-free Headroom compression with original-request fallback on failure.
 - Persistent CPA-only savings, latency, model breakdowns and 90-day hourly history.
 - Separate Headroom service view reading `/livez`, `/readyz`, `/health`, `/stats` and `/stats-history`.
@@ -25,7 +25,7 @@ Tested with CLIProxyAPI v7.3.4 and Headroom v0.37.0 on Linux amd64. The initial 
 
 ## Install
 
-Download `headroom_0.4.0_linux_amd64.zip` and `checksums.txt` from [Releases](https://github.com/frankyw/cliproxyapi-headroom/releases). Verify the checksum, extract `headroom.so`, and install it as `plugins/linux/amd64/headroom-v0.4.0.so` in CLIProxyAPI's persistent plugin directory. Back up your config and retain other plugin settings when merging:
+Download `headroom_0.5.0_linux_amd64.zip` and `checksums.txt` from [Releases](https://github.com/frankyw/cliproxyapi-headroom/releases). Verify the checksum, extract `headroom.so`, and install it as `plugins/linux/amd64/headroom-v0.5.0.so` in CLIProxyAPI's persistent plugin directory. Back up your config and retain other plugin settings when merging:
 
 ```yaml
 plugins:
@@ -39,6 +39,7 @@ plugins:
       timeout_ms: 10000
       min_chars: 512
       target_ratio: 0.5
+      compress_user_messages: true
       token_env: ""
       service_url: ""
 ```
@@ -60,7 +61,7 @@ Custom reverse proxies must pass `/v0/resource/plugins/*` to the corresponding m
 
 ## Statistics and interpretation
 
-CPA-only counters begin when v0.2+ is enabled. They record tool-output reductions accepted by this plugin before provider execution, not successful/billed provider requests. Token estimates are recorded only when Headroom's returned text is fully accepted and its token counters are valid. Partially accepted reductions retain byte metrics without claiming token savings. Requests without eligible text, unchanged responses and fallback failures are counted separately.
+CPA-only counters begin when v0.2+ is enabled. They record eligible-text reductions accepted by this plugin before provider execution, not successful/billed provider requests. Before v0.5.0, only tool results were eligible. Token estimates are recorded only when Headroom's returned text is fully accepted and its token counters are valid. Partially accepted reductions retain byte metrics without claiming token savings. Requests without eligible text, unchanged responses and fallback failures are counted separately.
 
 Snapshots are written atomically every two seconds and on orderly plugin shutdown. Abrupt termination may lose the last two seconds. `stats_path` must reside on persistent storage; empty means memory-only. The file stores aggregate counts, bounded model labels, 90 days of hourly history and the latest 100 metadata-only events. No prompts, tool contents, request headers or API keys are stored. Lifetime totals remain after hourly retention expires. A corrupt file is not silently overwritten; configuration fails so the operator can restore it.
 
@@ -68,7 +69,9 @@ The service section separately reads all five Headroom endpoints in parallel, wi
 
 ## Compression scope and limitations
 
-Eligible text includes Chat `tool`/legacy `function` content, Anthropic `tool_result` text, Responses `function_call_output`, and string leaves within Gemini `functionResponse.response` objects. Outputs shorter than `min_chars` bytes pass through. Gemini numeric fields and strings directly inside arrays are not compressed.
+Eligible text includes Chat `tool`/legacy `function` content, Anthropic `tool_result` text, Responses `function_call_output`, and string leaves within Gemini `functionResponse.response` objects. With `compress_user_messages: true` (the default), it also includes user-role string content and text blocks in Chat, Anthropic, Responses and Gemini requests. System messages remain untouched. Text shorter than `min_chars` bytes passes through. Gemini numeric fields and strings directly inside arrays are not compressed.
+
+The setting is read from CLIProxyAPI's plugin config at registration/reconfiguration and passed to Headroom in every compression request. Set it to `false` to restore tool-result-only behavior. Headroom's `HEADROOM_SAVINGS_PROFILE` controls server-side defaults and transforms; it cannot make this plugin select a field it has skipped. The per-request `compress_user_messages` value from this plugin takes precedence over that default. User-message compression is lossy and can shorten both documents and instructions within the same message. Test answer quality for your workload before relying on exact quotations or extraction.
 
 The plugin uses marker-free `lossy_inline` mode and rejects CCR hashes. It does not provide retrieval tools, contextual cross-message optimization or provider prefix-cache tracking. Compression is lossy; savings and answer quality depend on workload. The target ratio is not guaranteed. WebSocket behavior depends on the host invoking its interception hook and has not been independently tested.
 
@@ -89,9 +92,9 @@ On Linux with Docker, Python 3 and PyYAML, `python3 tests/integration.py` runs a
 
 ## Releases and plugin store
 
-Push a tag matching `plugin.go`, currently `v0.4.0`. GitHub Actions runs race tests and produces:
+Push a tag matching `plugin.go`, currently `v0.5.0`. GitHub Actions runs race tests and produces:
 
-- `headroom_0.4.0_linux_amd64.zip`, containing `headroom.so` at its root
+- `headroom_0.5.0_linux_amd64.zip`, containing `headroom.so` at its root
 - `checksums.txt`, in SHA-256 format
 
 See `store/registry-entry.json` and `store/PR.md` for the prepared official store entry. Store inclusion requires an upstream PR; publishing this repository does not itself list the plugin.
