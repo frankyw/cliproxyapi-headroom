@@ -1,7 +1,7 @@
 {
   "id": "headroom",
   "name": "Headroom Compression & Stats",
-  "description": "Compresses tool outputs with a local Headroom service and adds embedded CPA-specific savings, history, and Headroom health dashboards.",
+  "description": "Compresses tool outputs with Headroom and adds a public page of CPA savings, history, and Headroom health.",
   "author": "frankyw",
   "repository": "https://github.com/frankyw/cliproxyapi-headroom",
   "homepage": "https://github.com/frankyw/cliproxyapi-headroom",
