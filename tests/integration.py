@@ -1,6 +1,6 @@
 import json, threading, urllib.request, subprocess, time, pathlib, yaml, shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-root=pathlib.Path('/home/frank/cliproxyapi-headroom'); work=root/'work'/'integration';work.mkdir(parents=True,exist_ok=True)
+root=pathlib.Path(__file__).resolve().parents[1]; work=root/'work'/'integration';work.mkdir(parents=True,exist_ok=True)
 captures=[]
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
@@ -16,7 +16,9 @@ class Handler(BaseHTTPRequestHandler):
 server=ThreadingHTTPServer(('127.0.0.1',18319),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
 config={'host':'127.0.0.1','port':18318,'auth-dir':'/tmp/test-auth','api-keys':['test-only'],'remote-management':{'secret-key':'headroom-integration-only','allow-remote':True},'plugins':{'enabled':True,'dir':'/plugins','configs':{'headroom':{'enabled':True,'endpoint':'http://127.0.0.1:8787/v1/compress','timeout_ms':60000,'stats_path':'/stats/stats.json'}}},'openai-compatibility':[{'name':'mock','base-url':'http://127.0.0.1:18319/v1','api-key-entries':[{'api-key':'mock-only'}],'models':[{'name':'headroom-test','alias':'headroom-test'}]}]}
 (work/'config.yaml').write_text(yaml.safe_dump(config))
-plugin=work/'plugins'/'linux'/'amd64';plugin.mkdir(parents=True,exist_ok=True);shutil.copy2(root/'dist/headroom-v0.3.0.so',plugin)
+plugin=work/'plugins'/'linux'/'amd64';plugin.mkdir(parents=True,exist_ok=True)
+for old in plugin.glob('headroom*.so'):old.unlink()
+shutil.copy2(root/'dist/headroom.so',plugin/'headroom-v0.4.0.so')
 statsdir=work/'stats-v02';statsdir.mkdir(exist_ok=True)
 name='headroom-plugin-integration'
 subprocess.run(['docker','run','-d','--rm','--name',name,'--network','host','-v',str(work/'config.yaml')+':/CLIProxyAPI/config.yaml:ro','-v',str(work/'plugins')+':/plugins:ro','-v',str(statsdir)+':/stats','eceasy/cli-proxy-api:latest'],check=True,stdout=subprocess.DEVNULL)
@@ -47,19 +49,23 @@ try:
   urllib.request.urlopen('http://127.0.0.1:18318/v0/management/plugins/headroom/stats',timeout=5)
   raise AssertionError('stats exposed without authentication')
  except urllib.error.HTTPError as e:assert e.code in (401,403)
+ public=json.load(urllib.request.urlopen('http://127.0.0.1:18318/v0/resource/plugins/headroom/stats-data',timeout=5))
+ assert public['totals']==stats['totals'], 'public CPA totals differ'
  page=urllib.request.urlopen('http://127.0.0.1:18318/v0/resource/plugins/headroom/stats').read()
  assert b'Headroom compression' in page and b'TX-123' not in page
  req=urllib.request.Request('http://127.0.0.1:18318/v0/management/plugins',headers={'Authorization':'Bearer headroom-integration-only'})
  assert b'Headroom Stats' in urllib.request.urlopen(req).read()
  req=urllib.request.Request('http://127.0.0.1:18318/v0/management/plugins/headroom/service-stats',headers={'Authorization':'Bearer headroom-integration-only'})
  service=json.load(urllib.request.urlopen(req,timeout=10));assert len(service['endpoints'])==5 and all(e['ok'] for e in service['endpoints']),service
+ public_service=json.load(urllib.request.urlopen('http://127.0.0.1:18318/v0/resource/plugins/headroom/service-data',timeout=10))
+ assert len(public_service['endpoints'])==5 and all(e['ok'] for e in public_service['endpoints']),public_service
  time.sleep(3)
  subprocess.run(['docker','restart','-t','10',name],check=True,stdout=subprocess.DEVNULL)
  for _ in range(60):
   try:after=getstats();break
   except Exception:time.sleep(.5)
  assert after['totals']==stats['totals'],'stats lost on restart'
- summary.append({'stats_authenticated':True,'menu_registered':True,'restart_persistence':True,'compressed_requests':stats['totals']['compressed']})
+ summary.append({'stats_public':True,'management_stats_authenticated':True,'menu_registered':True,'restart_persistence':True,'compressed_requests':stats['totals']['compressed']})
  print(json.dumps(summary,indent=2));(work/'result.json').write_text(json.dumps(summary,indent=2))
 finally:
  logs=subprocess.run(['docker','logs',name],capture_output=True,text=True);(work/'container.log').write_text(logs.stdout+logs.stderr)
