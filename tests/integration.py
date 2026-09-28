@@ -18,7 +18,7 @@ config={'host':'127.0.0.1','port':18318,'auth-dir':'/tmp/test-auth','api-keys':[
 (work/'config.yaml').write_text(yaml.safe_dump(config))
 plugin=work/'plugins'/'linux'/'amd64';plugin.mkdir(parents=True,exist_ok=True)
 for old in plugin.glob('headroom*.so'):old.unlink()
-shutil.copy2(root/'dist/headroom.so',plugin/'headroom-v0.5.0.so')
+shutil.copy2(root/'dist/headroom.so',plugin/'headroom-v0.6.0.so')
 statsdir=work/'stats-v02';statsdir.mkdir(exist_ok=True)
 name='headroom-plugin-integration'
 subprocess.run(['docker','run','-d','--rm','--name',name,'--network','host','-v',str(work/'config.yaml')+':/CLIProxyAPI/config.yaml:ro','-v',str(work/'plugins')+':/plugins:ro','-v',str(statsdir)+':/stats','eceasy/cli-proxy-api:latest'],check=True,stdout=subprocess.DEVNULL)
@@ -57,23 +57,30 @@ try:
   urllib.request.urlopen('http://127.0.0.1:18318/v0/management/plugins/headroom/stats',timeout=5)
   raise AssertionError('stats exposed without authentication')
  except urllib.error.HTTPError as e:assert e.code in (401,403)
- public=json.load(urllib.request.urlopen('http://127.0.0.1:18318/v0/resource/plugins/headroom/stats-data',timeout=5))
- assert public['totals']==stats['totals'], 'public CPA totals differ'
+ for path in ('stats-data','service-data'):
+  try:
+   urllib.request.urlopen('http://127.0.0.1:18318/v0/resource/plugins/headroom/'+path,timeout=5)
+   raise AssertionError('dynamic data exposed through resource route: '+path)
+  except urllib.error.HTTPError as e:assert e.code==404,(path,e.code)
  page=urllib.request.urlopen('http://127.0.0.1:18318/v0/resource/plugins/headroom/stats').read()
  assert b'Headroom compression' in page and b'TX-123' not in page
+ assert b'/v0/management/plugins/headroom/stats' in page and b'cli-proxy-auth' in page
+ assert b'window.top.location.replace' not in page
  req=urllib.request.Request('http://127.0.0.1:18318/v0/management/plugins',headers={'Authorization':'Bearer headroom-integration-only'})
  assert b'Headroom Stats' in urllib.request.urlopen(req).read()
  req=urllib.request.Request('http://127.0.0.1:18318/v0/management/plugins/headroom/service-stats',headers={'Authorization':'Bearer headroom-integration-only'})
  service=json.load(urllib.request.urlopen(req,timeout=10));assert len(service['endpoints'])==5 and all(e['ok'] for e in service['endpoints']),service
- public_service=json.load(urllib.request.urlopen('http://127.0.0.1:18318/v0/resource/plugins/headroom/service-data',timeout=10))
- assert len(public_service['endpoints'])==5 and all(e['ok'] for e in public_service['endpoints']),public_service
+ try:
+  urllib.request.urlopen('http://127.0.0.1:18318/v0/management/plugins/headroom/service-stats',timeout=10)
+  raise AssertionError('service stats exposed without authentication')
+ except urllib.error.HTTPError as e:assert e.code in (401,403)
  time.sleep(3)
  subprocess.run(['docker','restart','-t','10',name],check=True,stdout=subprocess.DEVNULL)
  for _ in range(60):
   try:after=getstats();break
   except Exception:time.sleep(.5)
  assert after['totals']==stats['totals'],'stats lost on restart'
- summary.append({'stats_public':True,'management_stats_authenticated':True,'menu_registered':True,'restart_persistence':True,'compressed_requests':stats['totals']['compressed']})
+ summary.append({'dynamic_resource_routes_rejected':True,'management_stats_authenticated':True,'menu_registered':True,'restart_persistence':True,'compressed_requests':stats['totals']['compressed']})
  print(json.dumps(summary,indent=2));(work/'result.json').write_text(json.dumps(summary,indent=2))
 finally:
  logs=subprocess.run(['docker','logs',name],capture_output=True,text=True);(work/'container.log').write_text(logs.stdout+logs.stderr)
