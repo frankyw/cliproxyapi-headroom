@@ -83,14 +83,14 @@ func TestManagementRoutesAndStaticPage(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !bytes.Contains(raw, []byte("Headroom Stats")) || !bytes.Contains(raw, []byte("/plugins/headroom/stats")) || !bytes.Contains(raw, []byte("/stats-data")) || !bytes.Contains(raw, []byte("/service-data")) {
+	if !bytes.Contains(raw, []byte("Headroom Stats")) || !bytes.Contains(raw, []byte("/plugins/headroom/stats")) || bytes.Contains(raw, []byte("/stats-data")) || bytes.Contains(raw, []byte("/service-data")) {
 		t.Fatal("missing routes")
 	}
 	for _, test := range []struct {
 		path     string
 		code     int
 		contains string
-	}{{"/v0/resource/plugins/headroom/stats", 200, "<!doctype html>"}, {"/v0/resource/plugins/headroom/secret", 404, "not found"}} {
+	}{{"/v0/resource/plugins/headroom/stats", 200, "<!doctype html>"}, {"/v0/resource/plugins/headroom/stats-data", 404, "not found"}, {"/v0/resource/plugins/headroom/service-data", 404, "not found"}, {"/v0/resource/plugins/headroom/secret", 404, "not found"}} {
 		r, _ := json.Marshal(map[string]string{"Method": "GET", "Path": test.path})
 		raw, e := managementHandle(r)
 		if e != nil {

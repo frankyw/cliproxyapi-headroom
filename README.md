@@ -1,6 +1,6 @@
 # Headroom for CLIProxyAPI
 
-Native CLIProxyAPI plugin that compresses eligible user-message and tool-result text through Headroom and adds an embedded statistics page to CPA Manager Plus and compatible CPA-hosted panels. No manager modifications are required.
+Native CLIProxyAPI plugin that compresses eligible user-message and tool-result text through Headroom and adds a standalone statistics page served by CLIProxyAPI. No manager modifications are required.
 
 ## Features
 
@@ -21,11 +21,11 @@ Headroom returns compressed content; it does not forward the generation request.
 
 ## Requirements
 
-Tested with CLIProxyAPI v7.3.4 and Headroom v0.37.0 on Linux amd64. The initial release supports Linux amd64 with Debian Bookworm-compatible glibc. Headroom must run separately and support `/v1/compress` with `config.mode: lossy_inline`. The earlier compression-only plugin was also exercised with the existing deployment originally labelled 0.33.0; the live service now reports 0.37.0.
+Tested with CLIProxyAPI v7.3.17 and Headroom v0.37.0 on Linux amd64. Release archives target Linux amd64/arm64, macOS amd64/arm64, and Windows amd64; native platform CI validates each build. Headroom must run separately and support `/v1/compress` with `config.mode: lossy_inline`. The earlier compression-only plugin was also exercised with the existing deployment originally labelled 0.33.0; the live service now reports 0.37.0.
 
 ## Install
 
-Download `headroom_0.5.0_linux_amd64.zip` and `checksums.txt` from [Releases](https://github.com/frankyw/cliproxyapi-headroom/releases). Verify the checksum, extract `headroom.so`, and install it as `plugins/linux/amd64/headroom-v0.5.0.so` in CLIProxyAPI's persistent plugin directory. Back up your config and retain other plugin settings when merging:
+Download `headroom_0.6.0_linux_amd64.zip` and `checksums.txt` from [Releases](https://github.com/frankyw/cliproxyapi-headroom/releases). Verify the checksum, extract `headroom.so`, and install it as `plugins/linux/amd64/headroom-v0.6.0.so` in CLIProxyAPI's persistent plugin directory. Back up your config and retain other plugin settings when merging:
 
 ```yaml
 plugins:
@@ -44,20 +44,15 @@ plugins:
       service_url: ""
 ```
 
-Restart CLIProxyAPI, then refresh the manager and open **Headroom Stats** in its sidebar. Both Docker containers must share a network. Headroom requires `HEADROOM_COMPRESS_ALLOW_REMOTE=1` for compression requests from another container. If authentication is configured, set `token_env` to the name of a Headroom-token environment variable available to CLIProxyAPI; client and provider credentials are never forwarded.
+Restart CLIProxyAPI, then refresh the manager and select **Headroom Stats**. The page stays in the manager menu iframe. You can also open `http://<CPA-host>:8317/v0/resource/plugins/headroom/stats` directly. For saved-key reuse, open it on the same host and port as the manager where you signed in. Both Docker containers must share a network. Headroom requires `HEADROOM_COMPRESS_ALLOW_REMOTE=1` for compression requests from another container. If authentication is configured, set `token_env` to the name of a Headroom-token environment variable available to CLIProxyAPI; client and provider credentials are never forwarded.
 
 `service_url` optionally overrides the service root used for health/statistics. Empty uses the origin of `endpoint`. Use it if Headroom is hosted under a URL prefix. Keep these operator-configured endpoints on trusted infrastructure.
 
 ## Dashboard access
 
-The Headroom Stats page and its aggregate data are public plugin resources. Anyone who can reach the CLIProxyAPI or CPA Manager Plus address can view the model breakdown, recent request metadata, savings history, and filtered Headroom health and service metrics. The page does not ask for a second key. It never includes prompts, tool output, request headers, API keys, or Headroom project labels. Keep the manager address on a trusted network or protect it with your own reverse proxy if these aggregate figures should remain private.
+The **Headroom Stats** menu embeds `/v0/resource/plugins/headroom/stats` in the manager. The page reads the manager credential from same-origin `cli-proxy-auth`, supporting both `enc::v1::` and `enc::v2::` storage. In CPA Manager Plus server mode, select **Remember credential** at login so its Admin Key is saved on the CPAMP origin; in a direct CPA Manager login, select **Remember password** for the CPA Management Key. The page sends the saved value only to management routes on its own origin. Browser storage is isolated by host and port, so open the page from the same manager origin where you signed in. If a login was not saved, the page offers a per-tab credential field. No manager changes are required.
 
-- Page: `/v0/resource/plugins/headroom/stats`
-- Public CPA-only data: `/v0/resource/plugins/headroom/stats-data`
-- Public Headroom service data: `/v0/resource/plugins/headroom/service-data`
-- Existing authenticated management APIs remain available at `/v0/management/plugins/headroom/stats` and `/v0/management/plugins/headroom/service-stats`.
-
-Custom reverse proxies must pass `/v0/resource/plugins/*` to the corresponding manager/CPA service.
+Only the static HTML is available under `/v0/resource/plugins/headroom/stats`. The former public `/stats-data` and `/service-data` resource routes return 404. Statistics and filtered Headroom service health require CPA's management authentication at `/v0/management/plugins/headroom/stats` and `/v0/management/plugins/headroom/service-stats`. The page sends the key only to these same-origin CPA routes. It never includes prompts, tool output, request headers, API keys, or Headroom project labels in its data.
 
 ## Statistics and interpretation
 
@@ -88,14 +83,11 @@ HEADROOM_TEST_URL=http://headroom:8787/v1/compress sh scripts/test-live.sh
 
 The build uses Go 1.26 with a C compiler and `-buildmode=c-shared`, not Go's compiler-specific plugin format. Override release metadata with `REPOSITORY_URL` and `PLUGIN_AUTHOR`; GitHub Actions populates them automatically.
 
-On Linux with Docker, Python 3 and PyYAML, `python3 tests/integration.py` runs an isolated CLIProxyAPI container and mock provider with Headroom at `127.0.0.1:8787`, ports 18318/18319, and no production credentials. It verifies compression, streaming, public resource stats and still-authenticated management APIs, page registration, all five service endpoints and restart persistence. Work files remain in ignored `work/`.
+On Linux with Docker, Python 3 and PyYAML, `python3 tests/integration.py` runs an isolated CLIProxyAPI container and mock provider with Headroom at `127.0.0.1:8787`, ports 18318/18319, and no production credentials. It verifies compression, streaming, rejected public data routes and authenticated management APIs, standalone page registration, all five service endpoints and restart persistence. Work files remain in ignored `work/`.
 
 ## Releases and plugin store
 
-Push a tag matching `plugin.go`, currently `v0.5.0`. GitHub Actions runs race tests and produces:
-
-- `headroom_0.5.0_linux_amd64.zip`, containing `headroom.so` at its root
-- `checksums.txt`, in SHA-256 format
+Push a tag matching `plugin.go`, currently `v0.6.0`. GitHub Actions runs race tests and builds native C-shared libraries on five hosted runners. The release contains `headroom_0.6.0_<goos>_<goarch>.zip` for Linux amd64/arm64, macOS amd64/arm64, and Windows amd64, plus `checksums.txt`. Each archive contains only `headroom.so`, `headroom.dylib`, or `headroom.dll` at its root.
 
 See `store/registry-entry.json` and `store/PR.md` for the prepared official store entry. Store inclusion requires an upstream PR; publishing this repository does not itself list the plugin.
 
